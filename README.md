@@ -95,14 +95,19 @@ fix-message-ingest-accelerator/
 │   ├── architecture.png                   ← Architecture diagram
 │   └── architecture.mmd                   ← Mermaid source (editable)
 │
-└── skills-based-approach/                 ← Exchange onboarding accelerator
-    ├── SKILL.md                           ← Cursor Agent Skill for onboarding
-    ├── exchange-config-template.json      ← Parameterized exchange config
-    ├── reference.md                       ← FIX protocol & troubleshooting guide
+└── skills-based-approach/
+    ├── SKILL.md                           ← Cursor Agent Skill (for local dev scaffolding)
+    ├── exchange-config-template.json      ← Parameterized exchange config template
+    ├── reference.md                       ← FIX protocol details & troubleshooting guide
     ├── examples.md                        ← Worked examples (ICE, LME, Euronext, CME)
-    └── templates/
-        ├── exchange-pipeline.scala        ← Production notebook template
-        └── fix-parse-udf.scala            ← Reusable UDF patterns
+    ├── templates/
+    │   ├── exchange-pipeline.scala        ← Code-generation template (Cursor use)
+    │   └── fix-parse-udf.scala            ← Reusable UDF pattern reference
+    │
+    └── databricks-deployable/             ★ DEPLOY THIS TO DATABRICKS
+        ├── DEPLOYMENT_GUIDE.md            ← Step-by-step deployment instructions
+        ├── FIX_Exchange_Parser.scala      ← Universal notebook — works for ANY exchange
+        └── assistant-instructions.md      ← Custom instructions for Databricks AI Assistant
 ```
 
 ## Quick Start: Onboard a New Exchange
@@ -114,73 +119,39 @@ fix-message-ingest-accelerator/
 3. **Raw FIX log files** accessible on a Unity Catalog Volume
 4. A **target catalog and schema** in Unity Catalog
 
-### Steps
+### Option A: Use the Universal Notebook (Recommended)
 
-**1. Obtain the FIX data dictionary**
+Import `skills-based-approach/databricks-deployable/FIX_Exchange_Parser.scala` into your Databricks workspace. This is a single, ready-to-run notebook that handles **any exchange** — no code changes required. Just fill in the widgets:
 
-Every exchange publishes a FIX specification. You need the XML data dictionary file(s):
+| Widget | Description | Example |
+|--------|-------------|---------|
+| `exchange_name` | Short uppercase identifier | `EURONEXT` |
+| `fix_version` | FIX protocol version | `4.2`, `4.4`, `5.0SP2` |
+| `dictionary_mode` | `single` (FIX 4.x) or `dual` (FIX 5.0+) | `single` |
+| `transport_dict_path` | Volume path to transport dictionary XML | `/Volumes/users/.../EURONEXT.FIX44.xml` |
+| `application_dict_path` | Volume path to app dictionary (dual only) | *(leave empty for single)* |
+| `source_format` | `text` or `csv` | `text` |
+| `source_path` | Volume path/glob for raw data | `/Volumes/data/euronext/*.log` |
+| `csv_fix_column` | CSV column with FIX message (csv only) | `_c11` |
+| `target_table` | Full Unity Catalog table path | `prod_trading.fix_parsed.euronext_fix_messages` |
+| `quarantine_table` | Table for unparseable messages | `prod_trading.fix_parsed.euronext_fix_quarantine` |
 
-| FIX Version | Files Needed |
-|---|---|
-| FIX 4.0–4.4 | 1 transport dictionary XML |
-| FIX 5.0+ / FIXT 1.1 | 1 transport XML + 1 application XML |
+Click **Run All**. The notebook will validate the dictionary, parse every message, write to Delta, and print a summary.
 
-Upload the XML file(s) to a Unity Catalog Volume (e.g. `/Volumes/users/{you}/FIX/`).
+For full deployment instructions see [DEPLOYMENT_GUIDE.md](skills-based-approach/databricks-deployable/DEPLOYMENT_GUIDE.md).
 
-**2. Create the exchange config**
+### Option B: Use the Databricks AI Assistant
 
-Copy `skills-based-approach/exchange-config-template.json` and fill in the exchange-specific values:
+Optionally, load `skills-based-approach/databricks-deployable/assistant-instructions.md` into your workspace's AI Assistant custom instructions. Then ask the assistant "Help me onboard Euronext" and it will guide you through the widget configuration interactively.
 
-```json
-{
-  "exchange": { "name": "EURONEXT" },
-  "fix_protocol": {
-    "version": "4.4",
-    "dictionary_mode": "single",
-    "transport_dictionary_path": "/Volumes/users/josh_seidel/FIX/EURONEXT_OPTIQ.FIX44.xml"
-  },
-  "source": {
-    "format": "text",
-    "path": "/Volumes/data/euronext/orders_optiq_*.log"
-  },
-  "target": {
-    "catalog": "prod_trading",
-    "schema": "fix_parsed",
-    "table": "euronext_fix_messages",
-    "quarantine_table": "euronext_fix_quarantine"
-  }
-}
-```
+### After Running
 
-**3. Generate the pipeline notebook**
-
-Use the template at `skills-based-approach/templates/exchange-pipeline.scala`. Replace all `{{placeholder}}` values with your config. The template includes:
-
-- Widget-driven configuration (no hardcoded paths)
-- Dictionary validation (fail-fast on bad XML)
-- Serialization-safe Spark UDF
-- FIX → JSON → VARIANT transformation
-- Delta table writes with quarantine routing
-- Post-write validation
-
-**4. Validate the dictionary**
-
-Run the dictionary validation cell first. If it fails, consult `skills-based-approach/reference.md#dictionary-troubleshooting`.
-
-**5. Test with a small dataset**
-
-Run the pipeline against a single file or small subset before processing the full history.
-
-**6. Review quarantine**
-
-Check the quarantine table for unparseable messages. Common causes:
-- Custom tags not in the dictionary
-- FIX version mismatch
-- Delimiter issues (`|` vs `\x01`)
-
-**7. Schedule for production**
-
-Once validated, schedule the notebook as a Databricks Job with the appropriate cron expression.
+1. **Review the parsing summary** — the notebook prints total, success, and quarantine counts
+2. **Check the quarantine table** for unparseable messages:
+   ```sql
+   SELECT * FROM prod_trading.fix_parsed.euronext_fix_quarantine LIMIT 20;
+   ```
+3. **Schedule as a Databricks Job** once validated
 
 ## How the Parser Works
 
