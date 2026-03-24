@@ -1,0 +1,47 @@
+{
+  "$schema": "exchange-config-schema",
+  "$comment": "Template for onboarding a new exchange into the FIX parsing pipeline. Replace all {{placeholder}} values.",
+
+  "exchange": {
+    "name": "{{EXCHANGE_NAME}}",
+    "name_lower": "{{exchange_name_lower}}",
+    "description": "{{Human-readable exchange description}}"
+  },
+
+  "fix_protocol": {
+    "version": "{{4.2 | 4.4 | 5.0SP2}}",
+    "dictionary_mode": "{{single | dual}}",
+    "transport_dictionary_path": "/Volumes/users/{{user}}/FIX/{{EXCHANGE}}.{{FIX_VERSION}}.xml",
+    "application_dictionary_path": "/Volumes/users/{{user}}/FIX/{{EXCHANGE}}.{{APP_FIX_VERSION}}.xml"
+  },
+
+  "source": {
+    "format": "{{text | csv}}",
+    "path": "/Volumes/{{catalog}}/{{schema}}/{{volume}}/{{EXCHANGE_LOWER}}/*.log",
+    "csv_fix_column": "{{_c11 | null if text format}}",
+    "file_glob_pattern": "*.log",
+    "encoding": "UTF-8"
+  },
+
+  "target": {
+    "catalog": "{{target_catalog}}",
+    "schema": "{{target_schema}}",
+    "table": "{{exchange_lower}}_fix_messages",
+    "quarantine_table": "{{exchange_lower}}_fix_quarantine",
+    "write_mode": "append",
+    "partition_columns": ["fileName"]
+  },
+
+  "pipeline": {
+    "notebook_name": "{{exchange_name}}_FIX_Parser",
+    "cluster_spec": {
+      "spark_version": "14.3.x-scala2.12",
+      "node_type": "Standard_DS3_v2",
+      "num_workers": 2
+    },
+    "schedule": {
+      "cron": "0 6 * * *",
+      "timezone": "America/Chicago"
+    }
+  }
+}
